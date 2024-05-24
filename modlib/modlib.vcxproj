@@ -244,10 +244,7 @@
     <ClInclude Include="modlib.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="bytesassembler.cpp" />
-    <ClCompile Include="hookmanager.cpp" />
-    <ClCompile Include="llhook.cpp" />
-    <ClCompile Include="funcs.cpp" />
+    <ClCompile Include="modlib.cpp" />
     <ClCompile Include="tests_x64.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>

@@ -23,16 +23,7 @@
     <ClCompile Include="tests_x64.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="hookmanager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="bytesassembler.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="funcs.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="llhook.cpp">
+    <ClCompile Include="modlib.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

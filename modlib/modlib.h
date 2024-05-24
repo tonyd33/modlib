@@ -5,11 +5,31 @@
 #include <vector>
 #include <string>
 #include <bit>
+#include "bddisasm/bddisasm.h"
+#include "bddisasm/disasmtypes.h"
 
 #define MASK_IGNORE_CHAR '0'
 
 namespace Util
 {
+    /* helper class for adding assembly instructions easily. allows for a file-like
+       interface for pushing bytes into the stream. accounts for endianness */
+    class BytesAssembler
+    {
+    private:
+        std::vector<char> bytes;
+    public:
+        BytesAssembler& operator<<(uint8_t byte);
+        BytesAssembler& operator<<(const char* str);
+        BytesAssembler& operator<<(const std::vector<char>& data);
+        BytesAssembler& operator<<(uint32_t value);
+        BytesAssembler& operator<<(uint64_t value);
+
+        size_t size() const;
+        const char* data() const;
+        
+    };
+
     union XMMReg
     {
         float flt;
@@ -54,8 +74,13 @@ namespace Util
 // TODO: complete x86
 #define MIN_HOOK_SIZE 5
 #define CTX_SIZE 0xA8
-    struct x86Ctx {};
-    typedef void (*LLHookFunc)(x86tx*);
+    struct x86Ctx 
+    {
+
+    };
+    static_assert(sizeof(x86Ctx) == CTX_SIZE);
+
+    typedef void (*LLHookFunc)(x86Ctx*);
 #endif
 
 
@@ -73,7 +98,8 @@ namespace Util
     /* low level hook.
        tries to place a jmp at the specified address to a trampoline.
        trampoline will set up x(86|64)Ctx and then transfer control to
-       caller. */
+       caller via a call. once returned to trampoline, does some cleanup
+       before jumping back to original flow. */
     struct LLHook
     {
     private:
@@ -89,12 +115,15 @@ namespace Util
         uintptr_t target;
         LLHookFunc hook;
         unsigned size;
+        bool runBefore;
         bool enabled = false;
         bool prepared = false;
 
         LLHook();
         LLHook(uintptr_t t, LLHookFunc h);
         LLHook(uintptr_t t, LLHookFunc h, unsigned s);
+        LLHook(uintptr_t target, LLHookFunc hook, bool runBefore);
+        LLHook(uintptr_t t, LLHookFunc h, unsigned s, bool runBefore = false);
 
         HookStatus Prepare();
         HookStatus Enable();
@@ -103,16 +132,25 @@ namespace Util
         uintptr_t GetExecutableOrig();
     };
 
-
     class HookManager
     {
     private:
         std::map<uintptr_t, LLHook> llMap;
+
+        HookStatus LLHookCreate(LLHook hook, bool andEnable = false);
     public:
         HookStatus LLHookCreate(
             uintptr_t target,
             LLHookFunc hook,
+            bool runBefore = false,
+            /* do prepare and enable if true */
+            bool andEnable = false
+        );
+        HookStatus LLHookCreate(
+            uintptr_t target,
+            LLHookFunc hook,
             unsigned size,
+            bool runBefore = false,
             /* do prepare and enable if true */
             bool andEnable = false
         );
@@ -127,13 +165,24 @@ namespace Util
         void LLHookEnableAll();
         void LLHookDisableAll();
         void LLHookUnloadAll();
+        void LLHookDeleteAll();
 
         /*
             TODO: implement:
-            - hook in remote process (is this even reasonable?)
+            - hook in remote process (is this even reasonable? prob not)
             - function hooks
         */
     };
+
+#ifdef _WIN64
+#define ND_NATIVE_DEC  ND_CODE_64
+#define ND_NATIVE_DATA ND_DATA_64
+#else
+#define ND_NATIVE_DEC  ND_CODE_32
+#define ND_NATIVE_DATA ND_DATA_32
+#endif
+
+    uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&));
 
     /* get address of next instruction. */
     uintptr_t NextInstruction(uintptr_t currInstruction);

@@ -1,0 +1,5 @@
+{
+  "name": "modlib",
+  "version-string": "1.0.0",
+  "description": "Utility functions I find myself using often for SRE, hacking, modding, etc."
+}

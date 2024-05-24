@@ -1,8 +1,11 @@
 #include <iostream>
 #include <algorithm>
+#include <memory>
 #include "modlib.h"
+#include "bddisasm/bddisasm.h"
+#include "bddisasm/disasmtypes.h"
 
-/* i know there is the assert macro, but i don't like it because it just
+/* i know there are the assert macro, but i don't like it because it just
    crashes the program without giving helpful info. i rewrite it here to
    log extra info. */
 #define expectOrRet(EXPR, RET) if (!(EXPR)) { \
@@ -143,7 +146,7 @@ bool TestSearchPattern()
 
     auto SearchPattern = [byteArray](
         const char* pattern,
-        std::endian endian = std::endian::native
+        std::endian endian = std::endian::little
         )
         {
             return Util::SearchPattern(
@@ -239,41 +242,95 @@ bool TestResolveMLP()
 }
 
 
-static bool evil = false;
-void DummyFunc()
+extern "C"
 {
-    printf("Henlo world :D\n");
+    int evil = false;
+    extern void DummyFunc();
+    extern uint8_t DummyFuncStartLabel;
+    extern uint8_t DummyFuncMidLabel;
+}
+
+bool runBefore = false;
+bool ctxVerified = false;
+
+bool DummyHookBeforeVerifier(Util::x64Ctx* ctx)
+{
+    expect(ctx->rax == 1122);
+    expect(ctx->rbx == 2233);
+    expect(ctx->rcx == 3344);
+    return true;
+}
+
+bool DummyHookAfterVerifier(Util::x64Ctx* ctx)
+{
+    expect(ctx->rax == 4455);
+    expect(ctx->rbx == 6677);
+    expect(ctx->rcx == 8899);
+    return true;
 }
 
 void DummyHook(Util::x64Ctx* ctx)
 {
-    printf("Being evil >:D\n");
     evil = true;
+    if (runBefore)
+        ctxVerified = DummyHookBeforeVerifier(ctx);
+    else
+        ctxVerified = DummyHookAfterVerifier(ctx);
 }
 
 bool TestLLHook()
 {
     Util::HookManager hm;
-    // this sucks really bad, we want to make this test as compiler independent
-    // as possible, but... we'll fix that later
+    runBefore = false;
+    evil = false;
+    ctxVerified = false;
 
-    // DummyFunction is actually a near jmp instruction
-    uintptr_t dummyFuncRealAddr = (uintptr_t)DummyFunc;
-    // so we add the operand as an offset
-    dummyFuncRealAddr += *(uint32_t*)((uintptr_t)DummyFunc + 1);
-    // plus the number of bytes the jmp instruction is
-    dummyFuncRealAddr += 5;
+    /* idk why, but doing &DummyFuncLabel gives me an address to a jump
+       table entry to DummyFunc. addressof seems to give the real address */
+    uintptr_t startLabelAddr = (uintptr_t)std::addressof(DummyFuncStartLabel);
+    uintptr_t midLabelAddr = (uintptr_t)std::addressof(DummyFuncMidLabel);
+
+    // sanity checks
+    INSTRUX ix;
+    NDSTATUS status;
+    status = NdDecodeEx(&ix, (ND_UINT8*)startLabelAddr, 21, ND_CODE_64, ND_DATA_64);
+    expect(ND_SUCCESS(status));
+    expect(ix.Length == 7); // mov rax, x
+    // end sanity checks
+
+    // start hook and run orig code before
     hm.LLHookCreate(
-        dummyFuncRealAddr,
+        midLabelAddr,
         (Util::LLHookFunc)DummyHook,
-        0xf, // not good, try to make compiler independent
+        21,
+        runBefore,
         true
     );
-    expect(!evil);
     DummyFunc();
     expect(evil);
+    expect(ctxVerified);
+    evil = false;
+    ctxVerified = false;
+    hm.LLHookDeleteAll();
+    // end hook and run orig code before
 
-    hm.LLHookDelete(dummyFuncRealAddr);
+
+    // start hook and run orig code before
+    runBefore = true;
+    hm.LLHookCreate(
+        midLabelAddr,
+        (Util::LLHookFunc)DummyHook,
+        21,
+        runBefore,
+        true
+    );
+    DummyFunc();
+    expect(evil);
+    expect(ctxVerified);
+    evil = false;
+    ctxVerified = false;
+    hm.LLHookDeleteAll();
+    // end hook and run orig code before
 
     return true;
 }

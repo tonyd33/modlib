@@ -3,8 +3,8 @@
 #include <sstream>
 #include <string>
 #include "modlib.h"
-#include "bddisasm/bddisasm.h"
-#include "bddisasm/disasmtypes.h"
+#include <bddisasm/bddisasm.h>
+#include <bddisasm/disasmtypes.h>
 
 namespace Util
 {

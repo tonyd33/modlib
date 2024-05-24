@@ -4,8 +4,8 @@
 #include <string>
 #include <bit>
 #include "modlib.h"
-#include "bddisasm/bddisasm.h"
-#include "bddisasm/disasmtypes.h"
+#include <bddisasm/bddisasm.h>
+#include <bddisasm/disasmtypes.h>
 
 #define x64_PUSH_RSP "\x54"
 #define x64_PUSH_RBP "\x55"

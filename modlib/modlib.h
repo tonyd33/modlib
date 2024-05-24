@@ -5,8 +5,8 @@
 #include <vector>
 #include <string>
 #include <bit>
-#include "bddisasm/bddisasm.h"
-#include "bddisasm/disasmtypes.h"
+#include <bddisasm/bddisasm.h>
+#include <bddisasm/disasmtypes.h>
 
 #define MASK_IGNORE_CHAR '0'
 

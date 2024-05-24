@@ -2,8 +2,8 @@
 #include <algorithm>
 #include <memory>
 #include "modlib.h"
-#include "bddisasm/bddisasm.h"
-#include "bddisasm/disasmtypes.h"
+#include <bddisasm/bddisasm.h>
+#include <bddisasm/disasmtypes.h>
 
 /* i know there are the assert macro, but i don't like it because it just
    crashes the program without giving helpful info. i rewrite it here to

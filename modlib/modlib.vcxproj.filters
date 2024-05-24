@@ -20,7 +20,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="tests.cpp">
+    <ClCompile Include="tests_x64.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="hookmanager.cpp">
@@ -37,7 +37,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="tests_lowlevel.asm">
+    <MASM Include="tests_x64_lowlevel.asm">
       <Filter>Source Files</Filter>
     </MASM>
   </ItemGroup>

@@ -56,7 +56,7 @@
 #define x64_POP_RSP "\x5c"
 
 
-namespace Util 
+namespace Util
 {
 
     /* TODO: implement LLHook for x86 too
@@ -117,6 +117,13 @@ namespace Util
     }
 #else
        /* TODO: x86 */
+    void WritePushCtx(BytesAssembler& strm)
+    {
+    }
+
+    void WritePopCtx(BytesAssembler& strm)
+    {
+    }
 #endif
 
     /* tries to get a suitable instruction-aligned size for a hook.
@@ -124,13 +131,14 @@ namespace Util
        a ret can cause problems with hooking. callers of LLHook should
        supply their own size and whether to run before/after if they're
        confident of the hook behavior. */
-    uintptr_t FindHookSize(uintptr_t target)
+    unsigned FindHookSize(uintptr_t target)
     {
         auto cond = [](INSTRUX& ix) { return ix.Category != ND_CAT_RET; };
 
         uintptr_t end = DisasmUntil(target, MIN_HOOK_SIZE, cond);
-        if (end == 0) return end;
+        if (end == 0) return 0;
 
+        // no loss of data to unsigned because end - target < MIN_HOOK_SIZE
         return end - target;
     }
 
@@ -182,7 +190,7 @@ namespace Util
         if (size < MIN_HOOK_SIZE) return H_NOSPACE;
         if (prepared) return H_OK;
         DWORD tmpProt;
-        unsigned executableOrigOffset = 0;
+        size_t executableOrigOffset = 0;
         uintptr_t returnAddr = target + size;
 
         origInstrs.resize(size);
@@ -272,6 +280,10 @@ namespace Util
     }
 #else
     /* TODO: x86 */
+    HookStatus LLHook::Prepare()
+    {
+        return H_ERR;
+    }
 #endif
 
 #ifdef _WIN64
@@ -291,7 +303,7 @@ namespace Util
             ;
 
         // fill remaining bytes with nops
-        for (int i = strm.size(); i < size; i++)
+        for (size_t i = strm.size(); i < size; i++)
             strm << "\x90";
 
         memcpy((void*)target, strm.data(), size);
@@ -304,6 +316,10 @@ namespace Util
     }
 #else
     /* TODO: x86 */
+    HookStatus LLHook::Enable()
+    {
+        return H_ERR;
+    }
 #endif
 
     HookStatus LLHook::Disable()

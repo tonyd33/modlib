@@ -73,7 +73,7 @@ namespace Util
 #else
 // TODO: complete x86
 #define MIN_HOOK_SIZE 5
-#define CTX_SIZE 0xA8
+#define CTX_SIZE 1
     struct x86Ctx 
     {
 
@@ -106,7 +106,7 @@ namespace Util
         // don't use vector here because don't wanna ever change the pointer
         // to underlying r/w/e data
         char* trampoline = NULL;
-        unsigned trampSize;
+        size_t trampSize;
         DWORD trampProtect;
 
         std::vector<char> origInstrs;

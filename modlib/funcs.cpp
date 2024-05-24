@@ -34,6 +34,22 @@ namespace Util
         return result;
     }
 
+    /* tries to get a suitable instruction-aligned size for a hook.
+       if a ret is found within the min hook size, return 0 size.
+       a ret can cause problems with hooking. callers of LLHook should
+       supply their own size and whether to run before/after if they're
+       confident of the hook behavior. */
+    unsigned FindHookSize(uintptr_t target)
+    {
+        auto cond = [](INSTRUX& ix) { return ix.Category != ND_CAT_RET; };
+
+        uintptr_t end = DisasmUntil(target, MIN_HOOK_SIZE, cond);
+        if (end == 0) return 0;
+
+        // no loss of data to unsigned because end - target < MIN_HOOK_SIZE
+        return end - target;
+    }
+
     /* keeps disassembling instructions until a condition has been met or
        we hit the max. */
     uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&))

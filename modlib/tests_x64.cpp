@@ -12,6 +12,12 @@
 fprintf(stderr, "[%s:%d] Failed %s\n", __FILE__, __LINE__, #EXPR); \
 return (RET); \
 }
+#define expectStoreGoto(EXPR, STORE, LAB) if (!(EXPR)) { \
+fprintf(stderr, "[%s:%d] Failed %s\n", __FILE__, __LINE__, #EXPR); \
+ret = ret | false; \
+goto LAB; \
+}
+
 #define expect(EXPR) expectOrRet(EXPR, false);
 #define expectMain(EXPR) expectOrRet(EXPR, 1);
 
@@ -80,8 +86,8 @@ bool TestPatternParse()
     mask.clear();
     Util::ParsePattern(pattern, bytePattern, mask, std::endian::little);
     expect(bytePattern.size() == mask.size());
-    expect(bytePattern.size() == 2)
-        expect(bytePattern[0] == '\xD2');
+    expect(bytePattern.size() == 2);
+    expect(bytePattern[0] == '\xD2');
     expect(bytePattern[1] == '\xC4');
     expect(std::all_of(mask.begin(), mask.end(), isntMask));
     // end extra whitespace
@@ -311,7 +317,7 @@ bool TestLLHook()
     expect(ctxVerified);
     evil = false;
     ctxVerified = false;
-    hm.LLHookDeleteAll();
+    hm.HookDeleteAll();
     // end hook and run orig code before
 
 
@@ -329,9 +335,52 @@ bool TestLLHook()
     expect(ctxVerified);
     evil = false;
     ctxVerified = false;
-    hm.LLHookDeleteAll();
+    hm.HookDeleteAll();
     // end hook and run orig code before
 
+    return true;
+}
+
+/* TODO: spawn the process and pattern search for the desired instruction */
+bool TestAssemblyHookEx()
+{
+    Util::HookManager hm;
+    runBefore = true;
+
+    uintptr_t modBaseAddr = 0;
+    uintptr_t offset = 0x122e2;
+    uintptr_t target = 0;
+
+    // too lazy to debug creating the process from here. just run the program before running these tests for now
+    DWORD procId = Util::GetProcId(L"dummyprogram.exe");
+    expect(procId != 0);
+    HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, false, procId);
+    expect(hProc != NULL);
+
+    modBaseAddr = Util::GetModuleBaseAddr(procId, L"dummyprogram.exe");
+    expect(modBaseAddr != 0);
+    target = modBaseAddr + offset;
+
+    unsigned char buf[4];
+    expect(ReadProcessMemory(hProc, (LPCVOID)target, buf, 4, NULL) != 0);
+    expect(buf[0] == 0xc6);
+    expect(buf[1] == 0x45);
+    expect(buf[2] == 0x04);
+    expect(buf[3] == 0x00);
+
+    std::string assembly = "\xC6\x45\x04\x01"s;
+    hm.AssemblyHookCreate(hProc, target, std::vector<unsigned char>(assembly.begin(), assembly.end()), 15, true, true);
+
+    // the other process might be sleeping. give it some time to reach our hook and kill itself
+    Sleep(1500);
+    // now we can unload
+    hm.HookDeleteAll();
+
+
+CLEANUP:
+    // expect it to FAIL because the process should be terminated already
+    expect(TerminateProcess(hProc, 0) == 0);
+    CloseHandle(hProc);
     return true;
 }
 
@@ -341,6 +390,7 @@ int main()
     expectMain(TestSearchPattern());
     expectMain(TestResolveMLP());
     expectMain(TestLLHook());
+    expectMain(TestAssemblyHookEx());
 
     printf("All tests passed!\n");
     return 0;

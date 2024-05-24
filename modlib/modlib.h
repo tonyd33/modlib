@@ -2,11 +2,16 @@
 #include <Windows.h>
 #include <map>
 #include <stdint.h>
+#include <memory>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <bit>
 #include <bddisasm/bddisasm.h>
 #include <bddisasm/disasmtypes.h>
+
+/* REMEMBER TO USE THIS WHEN USING BytesAssembler OR OTHER ASSEMBLY STUFF!!!!! */
+using namespace std::string_literals;
 
 #define MASK_IGNORE_CHAR '0'
 
@@ -20,10 +25,14 @@ namespace Util
         std::vector<char> bytes;
     public:
         BytesAssembler& operator<<(uint8_t byte);
-        BytesAssembler& operator<<(const char* str);
-        BytesAssembler& operator<<(const std::vector<char>& data);
+        /* this is kind of bad honestly. it's way too easy to forget to
+           initialize a string literal and write something like "\xe9\x00\x01",
+           which will be recognized as "\xe9" when implicit casting */
+        BytesAssembler& operator<<(const std::string& data);
+        BytesAssembler& operator<<(const std::vector<unsigned char>& data);
         BytesAssembler& operator<<(uint32_t value);
         BytesAssembler& operator<<(uint64_t value);
+
 
         size_t size() const;
         const char* data() const;
@@ -93,6 +102,23 @@ namespace Util
         H_NOSPACE,
         H_STILLENABLED,
         H_EXISTS,
+        H_ABSTRACT
+    };
+
+    struct IHook
+    {
+    public:
+        uintptr_t target;
+        unsigned size;
+        bool enabled = false;
+        bool prepared = false;
+        bool runBefore;
+        bool runOrig = true;
+
+        virtual HookStatus Prepare() = 0;
+        virtual HookStatus Enable() = 0;
+        virtual HookStatus Disable() = 0;
+        virtual HookStatus Unload() = 0;
     };
 
     /* low level hook.
@@ -100,7 +126,7 @@ namespace Util
        trampoline will set up x(86|64)Ctx and then transfer control to
        caller via a call. once returned to trampoline, does some cleanup
        before jumping back to original flow. */
-    struct LLHook
+    struct LLHook : public IHook
     {
     private:
         // don't use vector here because don't wanna ever change the pointer
@@ -109,15 +135,12 @@ namespace Util
         size_t trampSize;
         DWORD trampProtect;
 
-        std::vector<char> origInstrs;
+        std::vector<unsigned char> origInstrs;
         uintptr_t executableOrig;
+
+        /* TODO: support runOrig = false in LLHook */
     public:
-        uintptr_t target;
         LLHookFunc hook;
-        unsigned size;
-        bool runBefore;
-        bool enabled = false;
-        bool prepared = false;
 
         LLHook();
         LLHook(uintptr_t t, LLHookFunc h);
@@ -125,25 +148,64 @@ namespace Util
         LLHook(uintptr_t target, LLHookFunc hook, bool runBefore);
         LLHook(uintptr_t t, LLHookFunc h, unsigned s, bool runBefore = false);
 
-        HookStatus Prepare();
-        HookStatus Enable();
-        HookStatus Disable();
-        HookStatus Unload();
+        HookStatus Prepare() override;
+        HookStatus Enable() override;
+        HookStatus Disable() override;
+        HookStatus Unload() override;
+        uintptr_t GetExecutableOrig();
+    };
+
+    /* even lower-level than LLHook.
+       we just place a jmp at the specified address to a tiny trampoline
+       that's accepted as bytecode. then, we jump back. */
+    struct AssemblyHook : public IHook
+    {
+    private:
+        // don't use vector here because don't wanna ever change the pointer
+        // to underlying r/w/e data
+        char* trampoline = NULL;
+        size_t trampSize;
+        DWORD trampProtect;
+
+        std::vector<unsigned char> origInstrs;
+        uintptr_t executableOrig;
+    public:
+        AssemblyHook();
+        /* TODO: find hook size on remote process */
+        // AssemblyHook(uintptr_t t, std::vector<char> h);
+        AssemblyHook(HANDLE hProc, uintptr_t t, std::vector<unsigned char> h, unsigned s);
+        // AssemblyHook(uintptr_t target, std::vector<char> hook, bool runBefore);
+        AssemblyHook(
+            HANDLE hProc,
+            uintptr_t t,
+            std::vector<unsigned char> h,
+            unsigned s,
+            bool runBefore = false
+        );
+
+        HANDLE hProc = NULL;
+        uintptr_t target;
+        std::vector<unsigned char> assembly;
+
+        HookStatus Prepare() override;
+        HookStatus Enable() override;
+        HookStatus Disable() override;
+        HookStatus Unload() override;
         uintptr_t GetExecutableOrig();
     };
 
     class HookManager
     {
     private:
-        std::map<uintptr_t, LLHook> llMap;
+        std::map<uintptr_t, std::unique_ptr<IHook>> llMap;
 
         HookStatus LLHookCreate(LLHook hook, bool andEnable = false);
+        HookStatus AssemblyHookCreate(AssemblyHook hook, bool andEnable = false);
     public:
         HookStatus LLHookCreate(
             uintptr_t target,
             LLHookFunc hook,
             bool runBefore = false,
-            /* do prepare and enable if true */
             bool andEnable = false
         );
         HookStatus LLHookCreate(
@@ -151,21 +213,37 @@ namespace Util
             LLHookFunc hook,
             unsigned size,
             bool runBefore = false,
-            /* do prepare and enable if true */
             bool andEnable = false
         );
-        HookStatus LLHookPrepare(uintptr_t target);
-        HookStatus LLHookEnable(uintptr_t target);
-        HookStatus LLHookDisable(uintptr_t target);
-        HookStatus LLHookUnload(uintptr_t target);
-        HookStatus LLHookDelete(uintptr_t target);
+
+        HookStatus AssemblyHookCreate(
+            HANDLE hProc,
+            uintptr_t target,
+            std::vector<unsigned char> assembly,
+            bool runBefore = false,
+            bool andEnable = false
+        );
+        HookStatus AssemblyHookCreate(
+            HANDLE hProc,
+            uintptr_t target,
+            std::vector<unsigned char> assembly,
+            unsigned size,
+            bool runBefore = false,
+            bool andEnable = false
+        );
+
+        HookStatus HookPrepare(uintptr_t target);
+        HookStatus HookEnable(uintptr_t target);
+        HookStatus HookDisable(uintptr_t target);
+        HookStatus HookUnload(uintptr_t target);
+        HookStatus HookDelete(uintptr_t target);
 
         /* not great because no status return */
-        void LLHookPrepareAll();
-        void LLHookEnableAll();
-        void LLHookDisableAll();
-        void LLHookUnloadAll();
-        void LLHookDeleteAll();
+        void HookPrepareAll();
+        void HookEnableAll();
+        void HookDisableAll();
+        void HookUnloadAll();
+        void HookDeleteAll();
 
         /*
             TODO: implement:
@@ -181,6 +259,8 @@ namespace Util
 #define ND_NATIVE_DEC  ND_CODE_32
 #define ND_NATIVE_DATA ND_DATA_32
 #endif
+
+    unsigned FindHookSize(uintptr_t target);
 
     uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&));
 

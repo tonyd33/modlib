@@ -8,6 +8,8 @@ namespace Util
         bytes.push_back(byte);
         return *this;
     }
+
+    /*
     BytesAssembler& BytesAssembler::operator<<(const char* str)
     {
         size_t len = strlen(str);
@@ -16,8 +18,15 @@ namespace Util
         }
         return *this;
     }
+    */
 
-    BytesAssembler& BytesAssembler::operator<<(const std::vector<char>& data)
+    BytesAssembler& BytesAssembler::operator<<(const std::string& data)
+    {
+        bytes.insert(bytes.end(), data.begin(), data.end());
+        return *this;
+    }
+
+    BytesAssembler& BytesAssembler::operator<<(const std::vector<unsigned char>& data)
     {
         bytes.insert(bytes.end(), data.begin(), data.end());
         return *this;

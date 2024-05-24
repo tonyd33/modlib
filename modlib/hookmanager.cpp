@@ -7,20 +7,39 @@ namespace Util
     {
         uintptr_t target = hook.target;
         if (llMap.contains(target)) return H_EXISTS;
-        llMap[target] = hook;
+        llMap[target] = std::make_unique<LLHook>(hook);
 
         if (!immediate) return H_OK;
 
         HookStatus ret;
 
-        ret = llMap[target].Prepare();
+        ret = llMap[target]->Prepare();
         if (ret != H_OK) return ret;
 
-        ret = llMap[target].Enable();
+        ret = llMap[target]->Enable();
         if (ret != H_OK) return ret;
 
         return H_OK;
     }
+    HookStatus HookManager::AssemblyHookCreate(AssemblyHook hook, bool immediate)
+    {
+        uintptr_t target = hook.target;
+        if (llMap.contains(target)) return H_EXISTS;
+        llMap[target] = std::make_unique<AssemblyHook>(hook);
+
+        if (!immediate) return H_OK;
+
+        HookStatus ret;
+
+        ret = llMap[target]->Prepare();
+        if (ret != H_OK) return ret;
+
+        ret = llMap[target]->Enable();
+        if (ret != H_OK) return ret;
+
+        return H_OK;
+    }
+
 
     HookStatus HookManager::LLHookCreate(
         uintptr_t target,
@@ -43,67 +62,91 @@ namespace Util
         return LLHookCreate(LLHook(target, hook, size, runBefore), immediate);
     }
 
-    HookStatus HookManager::LLHookPrepare(uintptr_t target)
+    /*
+    HookStatus HookManager::AssemblyHookCreate(
+        uintptr_t target,
+        std::vector<char> assembly,
+        bool runBefore,
+        bool immediate
+    )
     {
-        if (!llMap.contains(target)) return H_NOTFOUND;
-        return llMap[target].Prepare();
+        return IHookCreate(AssemblyHook(target, assembly, runBefore), immediate);
+    }
+    */
+
+    HookStatus HookManager::AssemblyHookCreate(
+        HANDLE hProc,
+        uintptr_t target,
+        std::vector<unsigned char> assembly,
+        unsigned size,
+        bool runBefore,
+        bool immediate
+    )
+    {
+        return AssemblyHookCreate(AssemblyHook(hProc, target, assembly, size, runBefore), immediate);
     }
 
-    HookStatus HookManager::LLHookEnable(uintptr_t target)
+    HookStatus HookManager::HookPrepare(uintptr_t target)
     {
         if (!llMap.contains(target)) return H_NOTFOUND;
-        return llMap[target].Enable();
+        return llMap[target]->Prepare();
     }
 
-    HookStatus HookManager::LLHookDisable(uintptr_t target)
+    HookStatus HookManager::HookEnable(uintptr_t target)
     {
         if (!llMap.contains(target)) return H_NOTFOUND;
-        return llMap[target].Disable();
+        return llMap[target]->Enable();
     }
 
-    HookStatus HookManager::LLHookUnload(uintptr_t target)
+    HookStatus HookManager::HookDisable(uintptr_t target)
     {
         if (!llMap.contains(target)) return H_NOTFOUND;
-        return llMap[target].Unload();
+        return llMap[target]->Disable();
     }
 
-    HookStatus HookManager::LLHookDelete(uintptr_t target)
+    HookStatus HookManager::HookUnload(uintptr_t target)
+    {
+        if (!llMap.contains(target)) return H_NOTFOUND;
+        return llMap[target]->Unload();
+    }
+
+    HookStatus HookManager::HookDelete(uintptr_t target)
     {
         if (!llMap.contains(target)) return H_NOTFOUND;
         HookStatus ret;
-        auto ll = llMap[target];
+        auto& ll = llMap[target];
 
-        ret = ll.Disable();
+        ret = ll->Disable();
         if (ret != H_OK) return ret;
 
-        ret = ll.Unload();
+        ret = ll->Unload();
         if (ret != H_OK) return ret;
 
         llMap.erase(target);
         return H_OK;
     }
 
-    void HookManager::LLHookPrepareAll()
+    void HookManager::HookPrepareAll()
     {
-        for (auto& [key, val] : llMap) { val.Prepare(); }
+        for (auto& [key, val] : llMap) { val->Prepare(); }
     }
-    void HookManager::LLHookEnableAll()
+    void HookManager::HookEnableAll()
     {
-        for (auto& [key, val] : llMap) { val.Enable(); }
+        for (auto& [key, val] : llMap) { val->Enable(); }
     }
-    void HookManager::LLHookDisableAll()
+    void HookManager::HookDisableAll()
     {
-        for (auto& [key, val] : llMap) { val.Disable(); }
+        for (auto& [key, val] : llMap) { val->Disable(); }
     }
-    void HookManager::LLHookUnloadAll()
+    void HookManager::HookUnloadAll()
     {
-        for (auto& [key, val] : llMap) { val.Unload(); }
+        for (auto& [key, val] : llMap) { val->Unload(); }
     }
 
-    void HookManager::LLHookDeleteAll()
+    void HookManager::HookDeleteAll()
     {
         auto keys = std::views::keys(llMap);
         std::vector<uintptr_t> keysCopy{ keys.begin(), keys.end() };
-        for (auto key : keysCopy) { LLHookDelete(key); }
+        for (auto key : keysCopy) { HookDelete(key); }
     }
 }

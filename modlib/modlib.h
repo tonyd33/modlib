@@ -10,6 +10,12 @@
 #include <bddisasm/bddisasm.h>
 #include <bddisasm/disasmtypes.h>
 
+/* 
+    TODO:
+    - use near jumps for small distances
+    - possibly write a small assembler so it's easy to call something like KERNEL32.Sleep
+*/
+
 /* REMEMBER TO USE THIS WHEN USING BytesAssembler OR OTHER ASSEMBLY STUFF!!!!! */
 using namespace std::string_literals;
 
@@ -45,8 +51,13 @@ namespace Util
         double dbl;
     };
 
+
 #ifdef _WIN64
-#define MIN_HOOK_SIZE 13
+#define MIN_HOOK_SIZE_FAR 13
+#define MIN_HOOK_SIZE_NEAR 5
+/* uhm, technically, it can be infinite with repeating prefixes...
+   shut up. */
+#define MAX_INSTR_LEN 15
 #define CTX_SIZE 0xA8
     /* registers at the time right before jumping to the hook function.
        note that there's no RIP register because no point. */
@@ -171,18 +182,6 @@ namespace Util
         uintptr_t executableOrig;
     public:
         AssemblyHook();
-        /* TODO: find hook size on remote process */
-        // AssemblyHook(uintptr_t t, std::vector<char> h);
-        AssemblyHook(HANDLE hProc, uintptr_t t, std::vector<unsigned char> h, unsigned s);
-        // AssemblyHook(uintptr_t target, std::vector<char> hook, bool runBefore);
-        AssemblyHook(
-            HANDLE hProc,
-            uintptr_t t,
-            std::vector<unsigned char> h,
-            unsigned s,
-            bool runBefore = false
-        );
-
         HANDLE hProc = NULL;
         uintptr_t target;
         std::vector<unsigned char> assembly;
@@ -199,38 +198,9 @@ namespace Util
     private:
         std::map<uintptr_t, std::unique_ptr<IHook>> llMap;
 
+    public:
         HookStatus LLHookCreate(LLHook hook, bool andEnable = false);
         HookStatus AssemblyHookCreate(AssemblyHook hook, bool andEnable = false);
-    public:
-        HookStatus LLHookCreate(
-            uintptr_t target,
-            LLHookFunc hook,
-            bool runBefore = false,
-            bool andEnable = false
-        );
-        HookStatus LLHookCreate(
-            uintptr_t target,
-            LLHookFunc hook,
-            unsigned size,
-            bool runBefore = false,
-            bool andEnable = false
-        );
-
-        HookStatus AssemblyHookCreate(
-            HANDLE hProc,
-            uintptr_t target,
-            std::vector<unsigned char> assembly,
-            bool runBefore = false,
-            bool andEnable = false
-        );
-        HookStatus AssemblyHookCreate(
-            HANDLE hProc,
-            uintptr_t target,
-            std::vector<unsigned char> assembly,
-            unsigned size,
-            bool runBefore = false,
-            bool andEnable = false
-        );
 
         HookStatus HookPrepare(uintptr_t target);
         HookStatus HookEnable(uintptr_t target);
@@ -340,4 +310,13 @@ namespace Util
 
     uintptr_t GetModuleBaseAddr(DWORD procId, const wchar_t* modName);
     DWORD GetProcId(const wchar_t* procName);
+
+    enum DLL_INJECTION_METHOD
+    {
+        DLL_INJECT_LOADLIBRARY,
+        DLL_INJECT_MANUALMAP,
+    };
+    /* we want to manual map almost 100% of the time, but doing regular
+       injection might be useful for checking an anti-cheat's capabilities */
+    bool InjectDLL(const wchar_t* dllPath, HANDLE hProc, DLL_INJECTION_METHOD method);
 }

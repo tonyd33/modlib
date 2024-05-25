@@ -41,51 +41,6 @@ namespace Util
     }
 
 
-    HookStatus HookManager::LLHookCreate(
-        uintptr_t target,
-        LLHookFunc hook,
-        bool runBefore,
-        bool immediate
-    )
-    {
-        return LLHookCreate(LLHook(target, hook, runBefore), immediate);
-    }
-
-    HookStatus HookManager::LLHookCreate(
-        uintptr_t target,
-        LLHookFunc hook,
-        unsigned size,
-        bool runBefore,
-        bool immediate
-    )
-    {
-        return LLHookCreate(LLHook(target, hook, size, runBefore), immediate);
-    }
-
-    /*
-    HookStatus HookManager::AssemblyHookCreate(
-        uintptr_t target,
-        std::vector<char> assembly,
-        bool runBefore,
-        bool immediate
-    )
-    {
-        return IHookCreate(AssemblyHook(target, assembly, runBefore), immediate);
-    }
-    */
-
-    HookStatus HookManager::AssemblyHookCreate(
-        HANDLE hProc,
-        uintptr_t target,
-        std::vector<unsigned char> assembly,
-        unsigned size,
-        bool runBefore,
-        bool immediate
-    )
-    {
-        return AssemblyHookCreate(AssemblyHook(hProc, target, assembly, size, runBefore), immediate);
-    }
-
     HookStatus HookManager::HookPrepare(uintptr_t target)
     {
         if (!llMap.contains(target)) return H_NOTFOUND;

@@ -9,17 +9,6 @@ namespace Util
         return *this;
     }
 
-    /*
-    BytesAssembler& BytesAssembler::operator<<(const char* str)
-    {
-        size_t len = strlen(str);
-        for (size_t i = 0; i < len; ++i) {
-            bytes.push_back(static_cast<char>(str[i]));
-        }
-        return *this;
-    }
-    */
-
     BytesAssembler& BytesAssembler::operator<<(const std::string& data)
     {
         bytes.insert(bytes.end(), data.begin(), data.end());

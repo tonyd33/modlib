@@ -43,10 +43,11 @@ namespace Util
     {
         auto cond = [](INSTRUX& ix) { return ix.Category != ND_CAT_RET; };
 
-        uintptr_t end = DisasmUntil(target, MIN_HOOK_SIZE, cond);
+        // no point in searching past this amount
+        uintptr_t end = DisasmUntil(target, MIN_HOOK_SIZE_FAR + MAX_INSTR_LEN, cond);
         if (end == 0) return 0;
 
-        // no loss of data to unsigned because end - target < MIN_HOOK_SIZE
+        // no loss of data to unsigned because end - target is bounded
         return end - target;
     }
 
@@ -312,5 +313,26 @@ namespace Util
         }
         CloseHandle(hSnap);
         return procId;
+    }
+
+    bool InjectDLL_LoadLibrary(const char* dllPath, HANDLE hProc, DLL_INJECTION_METHOD method)
+    {
+
+        void* loc = VirtualAllocEx(hProc, 0, MAX_PATH, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (loc == NULL) return false;
+
+        WriteProcessMemory(hProc, loc, dllPath, strlen(dllPath) + 1, NULL);
+
+        HANDLE hThread = CreateRemoteThread(hProc, 0, 0, (LPTHREAD_START_ROUTINE)LoadLibraryA, loc, 0, 0);
+        if (hThread == NULL) return false;
+
+        CloseHandle(hThread);
+
+        return true;
+    }
+
+    bool InjectDLL(const wchar_t* dllPath, HANDLE hProc, DLL_INJECTION_METHOD method)
+    {
+
     }
 }

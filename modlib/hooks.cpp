@@ -249,7 +249,7 @@ namespace Util
 #ifdef _WIN64
     HookStatus LLHook::Prepare()
     {
-        if (size < MIN_HOOK_SIZE) return H_NOSPACE;
+        if (size < MIN_HOOK_SIZE_FAR) return H_NOSPACE;
         if (prepared) return H_OK;
         DWORD tmpProt;
         size_t executableOrigOffset = 0;
@@ -400,49 +400,11 @@ namespace Util
     }
     */
 
-    AssemblyHook::AssemblyHook(HANDLE hProc, uintptr_t target, std::vector<unsigned char> hook, unsigned size)
-    {
-        this->hProc = hProc;
-        this->target = target;
-        this->assembly = hook;
-        this->size = size;
-    }
-
-    /* TODO: find hook size on remote process */
-    /*
-    AssemblyHook::AssemblyHook(
-        uintptr_t target,
-        std::vector<char> hook,
-        bool runBefore
-    )
-    {
-        this->target = target;
-        this->assembly = hook;
-        this->size = size;
-        this->size = FindHookSize(target);
-        this->runBefore = runBefore;
-    }
-    */
-
-    AssemblyHook::AssemblyHook(
-        HANDLE hProc,
-        uintptr_t target,
-        std::vector<unsigned char> hook,
-        unsigned size,
-        bool runBefore
-    )
-    {
-        this->hProc = hProc;
-        this->target = target;
-        this->assembly = hook;
-        this->size = size;
-        this->runBefore = runBefore;
-    }
 
 #ifdef _WIN64
     HookStatus AssemblyHook::Prepare()
     {
-        if (size < MIN_HOOK_SIZE) return H_NOSPACE;
+        if (size < MIN_HOOK_SIZE_FAR) return H_NOSPACE;
         if (prepared) return H_OK;
         DWORD tmpProt;
 

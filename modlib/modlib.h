@@ -118,13 +118,29 @@ namespace Util
 
     struct IHook
     {
-    public:
-        uintptr_t target;
-        unsigned size;
+    protected:
         bool enabled = false;
         bool prepared = false;
+        // don't use vector here because don't wanna ever change the pointer
+        // to underlying r/w/e data
+        char* trampoline = NULL;
+        // will we have to place a far jump?
+        bool isFar = true;
+        DWORD trampProtect;
+
+        std::vector<unsigned char> origInstrs;
+
+    public:
+        // TODO: protect these from caller trying to modify them when prepared/enabled
+        uintptr_t target;
+        unsigned size = 0;
         bool runBefore;
         bool runOrig = true;
+        // tries to allocate trampoline around here. used so we can try to get near jumps
+        uintptr_t preferredTrampLoc = 0;
+
+        bool IsEnabled();
+        bool IsPrepared();
 
         virtual HookStatus Prepare() = 0;
         virtual HookStatus Enable() = 0;
@@ -140,27 +156,17 @@ namespace Util
     struct LLHook : public IHook
     {
     private:
-        // don't use vector here because don't wanna ever change the pointer
-        // to underlying r/w/e data
-        char* trampoline = NULL;
-        size_t trampSize;
-        DWORD trampProtect;
-
-        std::vector<unsigned char> origInstrs;
         uintptr_t executableOrig;
 
-        /* TODO: support runOrig = false in LLHook */
+        HookStatus PrepareTrampoline();
+        HookStatus PrepareHookSize();
     public:
         LLHookFunc hook;
 
-        LLHook();
         LLHook(uintptr_t t, LLHookFunc h);
-        LLHook(uintptr_t t, LLHookFunc h, unsigned s);
-        LLHook(uintptr_t target, LLHookFunc hook, bool runBefore);
-        LLHook(uintptr_t t, LLHookFunc h, unsigned s, bool runBefore = false);
 
-        HookStatus Prepare() override;
         HookStatus Enable() override;
+        HookStatus Prepare() override;
         HookStatus Disable() override;
         HookStatus Unload() override;
         uintptr_t GetExecutableOrig();
@@ -172,22 +178,19 @@ namespace Util
     struct AssemblyHook : public IHook
     {
     private:
-        // don't use vector here because don't wanna ever change the pointer
-        // to underlying r/w/e data
-        char* trampoline = NULL;
-        size_t trampSize;
-        DWORD trampProtect;
-
-        std::vector<unsigned char> origInstrs;
         uintptr_t executableOrig;
+        HookStatus PrepareTrampoline();
+        HookStatus PrepareHookSize();
     public:
-        AssemblyHook();
+        AssemblyHook(uintptr_t t, std::vector<unsigned char> assembly);
+        AssemblyHook(HANDLE hProc, uintptr_t t, std::vector<unsigned char> assembly);
+
         HANDLE hProc = NULL;
         uintptr_t target;
         std::vector<unsigned char> assembly;
 
-        HookStatus Prepare() override;
         HookStatus Enable() override;
+        HookStatus Prepare() override;
         HookStatus Disable() override;
         HookStatus Unload() override;
         uintptr_t GetExecutableOrig();
@@ -230,9 +233,9 @@ namespace Util
 #define ND_NATIVE_DATA ND_DATA_32
 #endif
 
-    unsigned FindHookSize(uintptr_t target);
+    unsigned FindHookSize(uintptr_t target, bool isFar);
 
-    uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&));
+    uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&, unsigned));
 
     /* get address of next instruction. */
     uintptr_t NextInstruction(uintptr_t currInstruction);
@@ -319,4 +322,7 @@ namespace Util
     /* we want to manual map almost 100% of the time, but doing regular
        injection might be useful for checking an anti-cheat's capabilities */
     bool InjectDLL(const wchar_t* dllPath, HANDLE hProc, DLL_INJECTION_METHOD method);
+
+    void* AllocNear(size_t size, void* where);
+    void* AllocNearEx(HANDLE hProc, size_t size, void* where);
 }

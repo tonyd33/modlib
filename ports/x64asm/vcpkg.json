@@ -1,0 +1,11 @@
+{
+  "name": "x64asm",
+  "version": "2.1.1",
+  "description": "x86-64 assembler library",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host":  true
+    }
+  ]
+}

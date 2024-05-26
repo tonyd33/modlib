@@ -21,6 +21,7 @@ namespace Util
 
         return H_OK;
     }
+
     HookStatus HookManager::AssemblyHookCreate(AssemblyHook hook, bool immediate)
     {
         uintptr_t target = hook.target;

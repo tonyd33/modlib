@@ -3,9 +3,18 @@
 #include <sstream>
 #include <string>
 #include <bit>
+#include <iostream>
 #include "modlib.h"
 #include <bddisasm/bddisasm.h>
 #include <bddisasm/disasmtypes.h>
+
+// no way we're gonna need more than this much bytes for trampoline
+#define TRAMP_MAX_SIZE 512
+
+#define NMAX(a, b) ((a) > (b) ? a : b)
+#define NMIN(a, b) ((a) < (b) ? a : b)
+
+#undef max
 
 #define x64_PUSH_RSP "\x54"s
 #define x64_PUSH_RBP "\x55"s
@@ -55,13 +64,13 @@
 #define x64_POP_RBP "\x5d"s
 #define x64_POP_RSP "\x5c"s
 
-#define INTERN_ALLOC(hProc, size) malloc((size))
-#define EXTERN_ALLOC(hProc, size) VirtualAllocEx((hProc), 0, (size), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
-#define ALLOC(hProc, size) (uintptr_t)((hProc) == nullptr ? \
-    INTERN_ALLOC((hProc), (size)) : \
-    EXTERN_ALLOC((hProc), (size)))
+#define INTERN_ALLOC(hProc, size, pref) VirtualAlloc(((LPVOID)pref), (size), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+#define EXTERN_ALLOC(hProc, size, pref) VirtualAllocEx((hProc), ((LPVOID)pref), (size), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+#define ALLOC(hProc, size, pref) (uintptr_t)((hProc) == NULL ? \
+    INTERN_ALLOC(hProc, size, pref) : \
+    EXTERN_ALLOC(hProc, size, pref))
 
-#define INTERN_FREE(hProc, ptr) free((ptr))
+#define INTERN_FREE(hProc, ptr) VirtualFree((ptr), 0, MEM_RELEASE)
 #define EXTERN_FREE(hProc, ptr) VirtualFreeEx((hProc), (ptr), 0, MEM_RELEASE)
 #define FREE(hProc, ptr) \
 if ((hProc) == NULL) INTERN_FREE(hProc, ptr); \
@@ -184,93 +193,117 @@ namespace Util
     }
 #endif
 
-    HookStatus IHook::Prepare()
+    bool IHook::IsEnabled()
     {
-        return H_ABSTRACT;
+        return enabled;
     }
 
-    HookStatus IHook::Enable()
+    bool IHook::IsPrepared()
     {
-        return H_ABSTRACT;
+        return prepared;
     }
-
-    HookStatus IHook::Disable()
-    {
-        return H_ABSTRACT;
-    }
-
-    HookStatus IHook::Unload()
-    {
-        return H_ABSTRACT;
-    }
-
-    LLHook::LLHook() {}
 
     LLHook::LLHook(uintptr_t target, LLHookFunc hook)
     {
         this->target = target;
         this->hook = hook;
-        this->size = FindHookSize(target);
     }
 
-    LLHook::LLHook(uintptr_t target, LLHookFunc hook, unsigned size)
+    HookStatus LLHook::PrepareTrampoline()
     {
-        this->target = target;
-        this->hook = hook;
-        this->size = size;
+        uintptr_t pref = preferredTrampLoc == 0 ? target : preferredTrampLoc;
+        trampoline = (char*)AllocNear(TRAMP_MAX_SIZE, (void*)pref);
+
+        if (trampoline == NULL) return H_ERR;
+        return H_OK;
     }
 
-    LLHook::LLHook(
-        uintptr_t target,
-        LLHookFunc hook,
-        bool runBefore
-    )
+    HookStatus LLHook::PrepareHookSize()
     {
-        this->target = target;
-        this->hook = hook;
-        this->size = size;
-        this->size = FindHookSize(target);
-        this->runBefore = runBefore;
+        uint64_t diff = NMAX((uint64_t)trampoline, target) - NMIN((uint64_t)trampoline, target);
+        isFar = diff > std::numeric_limits<int>::max();
+
+        if (size == 0) // caller wanted us to find it automatically
+            size = FindHookSize(target, isFar);
+
+        if (size < (isFar ? MIN_HOOK_SIZE_FAR : MIN_HOOK_SIZE_NEAR)) return H_NOSPACE;
+        return H_OK;
     }
 
-    LLHook::LLHook(
-        uintptr_t target,
-        LLHookFunc hook,
-        unsigned size,
-        bool runBefore
-    )
+
+    HookStatus LLHook::Enable()
     {
-        this->target = target;
-        this->hook = hook;
-        this->size = size;
-        this->runBefore = runBefore;
+        if (!prepared) return H_NOTPREPARED;
+
+        DWORD tmp;
+        BytesAssembler strm;
+
+        VIRTUALPROTECT(NULL, target, size, PAGE_EXECUTE_READWRITE, &tmp);
+
+        if (isFar)
+        {
+            /* before jumping to the trampoline, we'll do:
+               push rax
+               mov rax, trampoline
+               jmp rax
+
+               so we gotta pop it here first */
+            strm
+                << "\x50"s                             // push rax
+                << "\x48\xB8"s << (uint64_t)trampoline // mov rax, trampoline
+                << "\xFF\xE0"s                         // jmp rax
+                ;
+        }
+        else
+        {
+            strm
+                << "\xe9" << (uint32_t)((uint64_t)trampoline - target) - 5; // jmp offset
+            ;
+        }
+
+        // fill remaining bytes with nops
+        for (size_t i = strm.size(); i < size; i++)
+            strm << "\x90"s;
+
+        WRITEMEM(NULL, target, strm.data(), size);
+
+        // restore protects
+        VIRTUALPROTECT(NULL, target, size, tmp, &tmp);
+
+        enabled = true;
+        return H_OK;
     }
 
-#ifdef _WIN64
     HookStatus LLHook::Prepare()
     {
-        if (size < MIN_HOOK_SIZE_FAR) return H_NOSPACE;
         if (prepared) return H_OK;
+
+        HookStatus ret;
+        if (ret = PrepareTrampoline(), ret != H_OK) return ret;
+        if (ret = PrepareHookSize(), ret != H_OK) return ret;
+
         DWORD tmpProt;
         size_t executableOrigOffset = 0;
         uintptr_t returnAddr = target + size;
 
         origInstrs.resize(size);
 
-
-        VirtualProtect((LPVOID)target, size, PAGE_EXECUTE_READWRITE, &tmpProt);
-        memcpy(origInstrs.data(), (void*)target, size);
-        VirtualProtect((LPVOID)target, size, tmpProt, &tmpProt);
+        VIRTUALPROTECT(NULL, target, size, PAGE_EXECUTE_READWRITE, &tmpProt);
+        READMEM(NULL, origInstrs.data(), target, size);
+        VIRTUALPROTECT(NULL, target, size, tmpProt, &tmpProt);
 
         BytesAssembler trampStrm;
 
-        /* before jumping to the trampoline, we'll do:
-           push rax
-           mov rax, trampoline
-           jmp rax
+        if (isFar)
+        {
+            /* before jumping to the trampoline, we'll do:
+               push rax
+               mov rax, trampoline
+               jmp rax
 
-           so we gotta pop it here first */
-        trampStrm << x64_POP_RAX;
+               so we gotta pop it here first */
+            trampStrm << x64_POP_RAX;
+        }
 
         if (runBefore && runOrig)
         {
@@ -302,59 +335,15 @@ namespace Util
 
         WriteJumpBack(trampStrm, returnAddr);
 
-        // set the actual trampoline
-        trampSize = trampStrm.size();
-        trampoline = (char*)malloc(trampSize);
-        if (trampoline == NULL) return H_ERR;
-
-        memcpy(trampoline, trampStrm.data(), trampSize);
+        WRITEMEM(NULL, trampoline, trampStrm.data(), trampStrm.size());
         // set appropriate memory access
-        VirtualProtect(trampoline, trampSize, PAGE_EXECUTE_READWRITE, &trampProtect);
+        VIRTUALPROTECT(NULL, trampoline, TRAMP_MAX_SIZE, PAGE_EXECUTE_READWRITE, &trampProtect);
 
         executableOrig = (uintptr_t)trampoline + executableOrigOffset;
 
         prepared = true;
         return H_OK;
     }
-    HookStatus LLHook::Enable()
-    {
-        if (!prepared) return H_NOTPREPARED;
-
-        DWORD tmp;
-        BytesAssembler strm;
-
-        VirtualProtect((LPVOID)target, size, PAGE_EXECUTE_READWRITE, &tmp);
-
-        strm
-            << "\x50"s                             // push rax
-            << "\x48\xB8"s << (uint64_t)trampoline // mov rax, trampoline
-            << "\xFF\xE0"s                         // jmp rax
-            ;
-
-        // fill remaining bytes with nops
-        for (size_t i = strm.size(); i < size; i++)
-            strm << "\x90"s;
-
-        memcpy((void*)target, strm.data(), size);
-
-        // restore protects
-        VirtualProtect((LPVOID)target, size, tmp, &tmp);
-
-        enabled = true;
-        return H_OK;
-    }
-#else
-    /* TODO: x86 */
-    HookStatus LLHook::Prepare()
-    {
-        return H_ERR;
-    }
-    /* TODO: x86 */
-    HookStatus LLHook::Enable()
-    {
-        return H_ERR;
-    }
-#endif
 
     HookStatus LLHook::Disable()
     {
@@ -362,9 +351,9 @@ namespace Util
 
         DWORD tmp;
 
-        VirtualProtect((LPVOID)target, size, PAGE_EXECUTE_READWRITE, &tmp);
-        memcpy((void*)target, origInstrs.data(), size);
-        VirtualProtect((LPVOID)target, size, tmp, &tmp);
+        VIRTUALPROTECT(NULL, target, size, PAGE_EXECUTE_READWRITE, &tmp);
+        WRITEMEM(NULL, target, origInstrs.data(), size);
+        VIRTUALPROTECT(NULL, target, size, tmp, &tmp);
 
         enabled = false;
         return H_OK;
@@ -375,12 +364,13 @@ namespace Util
         if (enabled) return H_STILLENABLED;
         if (!prepared) return H_OK;
 
-        VirtualProtect(trampoline, trampSize, trampProtect, &trampProtect);
-        free(trampoline);
+        VIRTUALPROTECT(NULL, trampoline, TRAMP_MAX_SIZE, trampProtect, &trampProtect);
+        FREE(NULL, trampoline);
 
         prepared = false;
         return H_OK;
     }
+
 
     uintptr_t LLHook::GetExecutableOrig()
     {
@@ -388,24 +378,91 @@ namespace Util
     }
 
 
-    AssemblyHook::AssemblyHook() {}
-
-    /* TODO: find hook size on remote process */
-    /*
-    AssemblyHook::AssemblyHook(uintptr_t target, std::vector<char> hook)
+    AssemblyHook::AssemblyHook(uintptr_t t, std::vector<unsigned char> assembly)
     {
-        this->target = target;
-        this->assembly = hook;
-        this->size = FindHookSize(target);
+        this->target = t;
+        this->assembly = assembly;
     }
-    */
 
+    AssemblyHook::AssemblyHook(HANDLE hProc, uintptr_t t, std::vector<unsigned char> assembly)
+    {
+        this->hProc = hProc;
+        this->target = t;
+        this->assembly = assembly;
+    }
 
-#ifdef _WIN64
+    HookStatus AssemblyHook::PrepareTrampoline()
+    {
+        uintptr_t pref = preferredTrampLoc == 0 ? target : preferredTrampLoc;
+
+        if (hProc == NULL)
+            trampoline = (char*)AllocNear(TRAMP_MAX_SIZE, (void*)pref);
+        else
+            trampoline = (char*)AllocNearEx(hProc, TRAMP_MAX_SIZE, (void*)pref);
+
+        if (trampoline == NULL) return H_ERR;
+        return H_OK;
+    }
+
+    HookStatus AssemblyHook::PrepareHookSize()
+    {
+        // not implemented for remote process
+        if (hProc != NULL && size == 0) return H_ABSTRACT;
+
+        uint64_t diff = NMAX((uint64_t)trampoline, target) - NMIN((uint64_t)trampoline, target);
+        isFar = diff > std::numeric_limits<int>::max();
+
+        if (size == 0) // caller wanted us to find it automatically
+            size = FindHookSize(target, isFar);
+
+        if (size < (isFar ? MIN_HOOK_SIZE_FAR : MIN_HOOK_SIZE_NEAR)) return H_NOSPACE;
+        return H_OK;
+    }
+
+    HookStatus AssemblyHook::Enable()
+    {
+        if (!prepared) return H_NOTPREPARED;
+
+        DWORD tmp;
+        BytesAssembler strm;
+
+        VIRTUALPROTECT(hProc, target, size, PAGE_EXECUTE_READWRITE, &tmp);
+
+        if (isFar)
+        {
+            strm
+                << "\x50"s                             // push rax
+                << "\x48\xB8"s << (uint64_t)trampoline // mov rax, trampoline
+                << "\xFF\xE0"s                         // jmp rax
+                ;
+        }
+        else
+        {
+            strm
+                << "\xe9" << (uint32_t)((uint64_t)trampoline - target) - 5; // jmp offset
+            ;
+        }
+
+        // fill remaining bytes with nops
+        for (size_t i = strm.size(); i < size; i++)
+            strm << "\x90"s;
+
+        WRITEMEM(hProc, target, strm.data(), size);
+
+        // restore protects
+        VIRTUALPROTECT(hProc, target, size, tmp, &tmp);
+
+        enabled = true;
+        return H_OK;
+    }
     HookStatus AssemblyHook::Prepare()
     {
-        if (size < MIN_HOOK_SIZE_FAR) return H_NOSPACE;
         if (prepared) return H_OK;
+
+        HookStatus ret;
+        if (ret = PrepareTrampoline(), ret != H_OK) return ret;
+        if (ret = PrepareHookSize(), ret != H_OK) return ret;
+
         DWORD tmpProt;
 
         size_t executableOrigOffset = 0;
@@ -418,13 +475,17 @@ namespace Util
 
         BytesAssembler trampStrm;
 
-        /* before jumping to the trampoline, we'll do:
-           push rax
-           mov rax, trampoline
-           jmp rax
+        if (isFar)
+        {
+            /* before jumping to the trampoline, we'll do:
+               push rax
+               mov rax, trampoline
+               jmp rax
 
-           so we gotta pop it here first */
-        trampStrm << x64_POP_RAX;
+               so we gotta pop it here first */
+            trampStrm << x64_POP_RAX;
+        }
+
         if (runBefore && runOrig)
         {
             executableOrigOffset = trampStrm.size();
@@ -441,60 +502,15 @@ namespace Util
 
         WriteJumpBack(trampStrm, returnAddr);
 
-        // set the actual trampoline
-        trampSize = trampStrm.size();
-        trampoline = (char*)ALLOC(hProc, trampSize);
-        if (trampoline == NULL) return H_ERR;
-
-        WRITEMEM(hProc, trampoline, trampStrm.data(), trampSize);
+        WRITEMEM(hProc, trampoline, trampStrm.data(), trampStrm.size());
         // set appropriate memory access
-        VIRTUALPROTECT(hProc, trampoline, trampSize, PAGE_EXECUTE_READWRITE, &trampProtect);
+        VIRTUALPROTECT(hProc, trampoline, TRAMP_MAX_SIZE, PAGE_EXECUTE_READWRITE, &trampProtect);
 
         executableOrig = (uintptr_t)trampoline + executableOrigOffset;
 
         prepared = true;
         return H_OK;
     }
-    HookStatus AssemblyHook::Enable()
-    {
-        if (!prepared) return H_NOTPREPARED;
-
-        DWORD tmp;
-        BytesAssembler strm;
-
-        VIRTUALPROTECT(hProc, target, size, PAGE_EXECUTE_READWRITE, &tmp);
-
-        strm
-            << "\x50"s                             // push rax
-            << "\x48\xB8"s << (uint64_t)trampoline // mov rax, trampoline
-            << "\xFF\xE0"s                         // jmp rax
-            ;
-
-        // fill remaining bytes with nops
-        for (size_t i = strm.size(); i < size; i++)
-            strm << "\x90"s;
-
-        WRITEMEM(hProc, target, strm.data(), size);
-
-        // restore protects
-        VIRTUALPROTECT(hProc, target, size, tmp, &tmp);
-
-        enabled = true;
-        return H_OK;
-    }
-#else
-    /* TODO: x86 */
-    HookStatus AssemblyHook::Prepare()
-    {
-        return H_ERR;
-    }
-    /* TODO: x86 */
-    HookStatus AssemblyHook::Enable()
-    {
-        return H_ERR;
-    }
-#endif
-
     HookStatus AssemblyHook::Disable()
     {
         if (!enabled) return H_OK;
@@ -508,13 +524,12 @@ namespace Util
         enabled = false;
         return H_OK;
     }
-
     HookStatus AssemblyHook::Unload()
     {
         if (enabled) return H_STILLENABLED;
         if (!prepared) return H_OK;
 
-        VIRTUALPROTECT(hProc, trampoline, trampSize, trampProtect, &trampProtect);
+        VIRTUALPROTECT(hProc, trampoline, TRAMP_MAX_SIZE, trampProtect, &trampProtect);
         FREE(hProc, trampoline);
 
         prepared = false;

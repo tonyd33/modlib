@@ -305,14 +305,12 @@ bool TestLLHook()
     // end sanity checks
 
     // start hook and run orig code before
-    Util::LLHook hook1;
-    hook1.target = midLabelAddr;
-    hook1.hook = DummyHook;
+    Util::LLHook hook1(midLabelAddr, DummyHook);
     hook1.size = 21;
     runBefore = false;
     hook1.runBefore = runBefore;
-    hook1.Prepare();
-    hook1.Enable();
+    expect(hook1.Prepare() == Util::H_OK);
+    expect(hook1.Enable() == Util::H_OK);
     DummyFunc();
     expect(evil);
     expect(ctxVerified);
@@ -324,14 +322,12 @@ bool TestLLHook()
 
 
     // start hook and run orig code before
-    Util::LLHook hook2;
-    hook2.target = midLabelAddr;
-    hook2.hook = DummyHook;
+    Util::LLHook hook2(midLabelAddr, DummyHook);
     hook2.size = 21;
     runBefore = true;
     hook2.runBefore = runBefore;
-    hook2.Prepare();
-    hook2.Enable();
+    expect(hook2.Prepare() == Util::H_OK);
+    expect(hook2.Enable() == Util::H_OK);
     DummyFunc();
     expect(evil);
     expect(ctxVerified);
@@ -340,6 +336,14 @@ bool TestLLHook()
     hook2.Disable();
     hook2.Unload();
     // end hook and run orig code before
+
+    // start hook auto size
+    Util::LLHook hook3(midLabelAddr, DummyHook);
+    hook3.size = 0;
+    expect(hook3.Prepare() == Util::H_OK);
+    expect(hook3.size <= MIN_HOOK_SIZE_FAR);
+    hook3.Unload();
+    // end hook autosize
 
     return true;
 }
@@ -372,10 +376,7 @@ bool TestAssemblyHookEx()
     expect(buf[3] == 0x00);
 
     std::string assembly = "\xC6\x45\x04\x01"s;
-    Util::AssemblyHook hook;
-    hook.hProc = hProc;
-    hook.target = target;
-    hook.assembly = std::vector<unsigned char>(assembly.begin(), assembly.end());
+    Util::AssemblyHook hook(hProc, target, std::vector<unsigned char>(assembly.begin(), assembly.end()));
     hook.size = 15;
     hook.runBefore = true;
     hook.Prepare();
@@ -386,7 +387,6 @@ bool TestAssemblyHookEx()
     hook.Unload();
 
 
-CLEANUP:
     // expect it to FAIL because the process should be terminated already
     expect(TerminateProcess(hProc, 0) == 0);
     CloseHandle(hProc);

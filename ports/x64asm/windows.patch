@@ -1,0 +1,22 @@
+diff --git a/Makefile b/Makefile
+index f2ab83d..f24d986 100644
+--- a/Makefile
++++ b/Makefile
+@@ -17,7 +17,7 @@
+ ifndef CXX
+ 	CXX=g++
+ endif
+-GCC=ccache ${CXX} -Werror -Wextra -Wall -Wfatal-errors -pedantic -Wno-unused-parameter -Wno-reorder -std=c++11 -fPIC
++GCC=${CXX} -Werror -Wextra -Wall -Wfatal-errors -pedantic -Wno-unused-parameter -Wno-reorder -std=c++11 -fPIC
+ 
+ INC=-I./
+ 		
+@@ -65,7 +65,7 @@ erthing: $(LIB) $(BIN)
+ 
+ src/Codegen: src/Codegen.hs src/x86.csv
+ 	cd src && \
+-		ghc Codegen.hs && \
++		stack ghc Codegen.hs && \
+ 		./Codegen && \
+ 		rm -f *.hi *.o
+ 

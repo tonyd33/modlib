@@ -3,8 +3,11 @@
 #include <sstream>
 #include <string>
 #include "modlib.h"
+#include <iostream>
 #include <bddisasm/bddisasm.h>
 #include <bddisasm/disasmtypes.h>
+
+#define ALLOC_NEAR_MAX_RETRIES 32
 
 namespace Util
 {
@@ -39,12 +42,30 @@ namespace Util
        a ret can cause problems with hooking. callers of LLHook should
        supply their own size and whether to run before/after if they're
        confident of the hook behavior. */
-    unsigned FindHookSize(uintptr_t target)
+    unsigned FindHookSize(uintptr_t target, bool isFar)
     {
-        auto cond = [](INSTRUX& ix) { return ix.Category != ND_CAT_RET; };
+        unsigned stop = (isFar ? MIN_HOOK_SIZE_FAR : MIN_HOOK_SIZE_NEAR);
+        unsigned max = stop + MAX_INSTR_LEN;
 
-        // no point in searching past this amount
-        uintptr_t end = DisasmUntil(target, MIN_HOOK_SIZE_FAR + MAX_INSTR_LEN, cond);
+        auto cond = [stop](INSTRUX& ix, unsigned acc) { return ix.Category == ND_CAT_RET || (acc > stop);  };
+        INSTRUX ix;
+        NDSTATUS status;
+
+        unsigned acc = 0;
+
+        do {
+            status = NdDecode(&ix, (ND_UINT8*)target + acc, ND_NATIVE_DEC, ND_NATIVE_DATA);
+
+            /* discard the entire operation if not success. this may mean we
+               weren't properly byte-aligned to begin with or something else
+               as catastrophically bad. */
+            if (!ND_SUCCESS(status)) break;
+
+            acc += ix.Length;
+        } while (!cond(ix, acc) && acc < max);
+
+        uintptr_t end = (uintptr_t)target + acc;
+
         if (end == 0) return 0;
 
         // no loss of data to unsigned because end - target is bounded
@@ -53,16 +74,15 @@ namespace Util
 
     /* keeps disassembling instructions until a condition has been met or
        we hit the max. */
-    uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&))
+    uintptr_t DisasmUntil(uintptr_t start, unsigned max, bool (*cond)(INSTRUX&, unsigned))
     {
         INSTRUX ix;
         NDSTATUS status;
-        ND_UINT8* curr = (ND_UINT8*)start;
 
         unsigned acc = 0;
 
         do {
-            status = NdDecode(&ix, (ND_UINT8*)curr, ND_NATIVE_DEC, ND_NATIVE_DATA);
+            status = NdDecode(&ix, (ND_UINT8*)start + acc, ND_NATIVE_DEC, ND_NATIVE_DATA);
 
             /* discard the entire operation if not success. this may mean we
                weren't properly byte-aligned to begin with or something else
@@ -70,7 +90,7 @@ namespace Util
             if (!ND_SUCCESS(status)) return 0;
 
             acc += ix.Length;
-        } while (!cond(ix) && acc < max);
+        } while (!cond(ix, acc) && acc < max);
 
         return start + acc;
     }
@@ -333,6 +353,38 @@ namespace Util
 
     bool InjectDLL(const wchar_t* dllPath, HANDLE hProc, DLL_INJECTION_METHOD method)
     {
+        return false;
+    }
 
+    void* AllocNear(size_t size, void* where)
+    {
+        unsigned offset = 0;
+        unsigned i = 0;
+        void* addr = NULL;
+        do {
+            addr = VirtualAlloc((LPVOID)((uintptr_t)where + offset), size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            offset = (offset == 0 ? 1 : (offset << 1));
+            i++;
+        } while (addr == NULL && i < ALLOC_NEAR_MAX_RETRIES);
+
+        if (addr == NULL) addr = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+        return addr;
+    }
+
+    void* AllocNearEx(HANDLE hProc, size_t size, void* where)
+    {
+        unsigned offset = 0;
+        unsigned i = 0;
+        void* addr;
+        do {
+            addr = VirtualAllocEx(hProc, (LPVOID)((uintptr_t)where + offset), size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            offset = (offset == 0 ? 1 : (offset << 1));
+            i++;
+        } while (addr == NULL && i < ALLOC_NEAR_MAX_RETRIES);
+
+        if (addr == NULL) addr = VirtualAllocEx(hProc, 0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+        return addr;
     }
 }

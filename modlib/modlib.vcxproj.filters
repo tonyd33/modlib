@@ -32,7 +32,7 @@
     <ClCompile Include="funcs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="llhook.cpp">
+    <ClCompile Include="hooks.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
